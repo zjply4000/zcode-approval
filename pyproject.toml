@@ -1,7 +1,7 @@
 [project]
 name = "zcode-approval"
 version = "0.1.0"
-description = "ZCode PreToolUse hook: deterministic & Jev-based automated approval"
+description = "ZCode PreToolUse guardrail built on the shared jev-evaluator core, combining deterministic rules and TypeSafe Jev for allow, ask, and deny decisions"
 requires-python = ">=3.10"
 dependencies = [
     # Local core package from ../antigravity-approval (install with: pip install -e ../antigravity-approval)
