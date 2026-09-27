@@ -5,3 +5,17 @@ __pycache__/
 *.bak
 *.log
 .superpowers/
+
+# Environment & Secret files
+.env
+*.env
+*.env.*
+jev.env
+.zcode/jev.env
+.zcode/jev_approval/config.json
+
+# Packaging & Build artifacts
+*.egg-info/
+dist/
+build/
+

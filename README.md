@@ -42,7 +42,7 @@
 ## Directory Structure
 
 ```text
-D:\Projects\Jev\zcode-approval\
+zcode-approval\
 ├── pyproject.toml              # Project metadata & editable dependency on ../antigravity-approval
 ├── scripts\
 │   ├── zcode_evaluator.py      # Hook evaluator adapter (CLI entrypoint)

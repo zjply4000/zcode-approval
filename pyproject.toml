@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "ZCode PreToolUse hook: deterministic & Jev-based automated approval"
 requires-python = ">=3.10"
 dependencies = [
+    # Local core package from ../antigravity-approval (install with: pip install -e ../antigravity-approval)
     "jev-evaluator",
 ]
 

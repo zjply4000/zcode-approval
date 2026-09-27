@@ -20,9 +20,13 @@ try:
     from jev_eval.logging_setup import audit, build_audit_logger
     from jev_eval.reader import read_stdin_payload
 except ImportError:
-    _alt_src = Path(__file__).resolve().parents[2] / "antigravity-approval" / "src"
-    if _alt_src.exists() and str(_alt_src) not in sys.path:
-        sys.path.insert(0, str(_alt_src))
+    _env_src = os.environ.get("JEV_EVAL_SRC")
+    if _env_src and Path(_env_src).exists() and _env_src not in sys.path:
+        sys.path.insert(0, _env_src)
+    else:
+        _alt_src = Path(__file__).resolve().parents[2] / "antigravity-approval" / "src"
+        if _alt_src.exists() and str(_alt_src) not in sys.path:
+            sys.path.insert(0, str(_alt_src))
     from jev_eval.config import load_settings
     from jev_eval.decide import Decision, finalize_tier2
     from jev_eval.deterministic import evaluate_tool_call
