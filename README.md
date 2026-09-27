@@ -1,3 +1,5 @@
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 # zcode-approval
 
 A hook-based permission guardrail for [ZCode](https://zcode.z.ai/) (`PreToolUse` + `PermissionRequest`) that adapts the shared **`jev-evaluator`** policy core to ZCode's hook protocol and security model.
