@@ -16,6 +16,7 @@ try:
     from jev_eval.config import load_settings
     from jev_eval.decide import Decision, finalize_tier2
     from jev_eval.deterministic import evaluate_tool_call
+    from jev_eval.formatter import format_fallback_reason
     from jev_eval.jev_client import evaluate_command
     from jev_eval.logging_setup import audit, build_audit_logger
     from jev_eval.reader import read_stdin_payload
@@ -30,6 +31,7 @@ except ImportError:
     from jev_eval.config import load_settings
     from jev_eval.decide import Decision, finalize_tier2
     from jev_eval.deterministic import evaluate_tool_call
+    from jev_eval.formatter import format_fallback_reason
     from jev_eval.jev_client import evaluate_command
     from jev_eval.logging_setup import audit, build_audit_logger
     from jev_eval.reader import read_stdin_payload
@@ -106,13 +108,13 @@ def main() -> int:
 
     raw = read_stdin_payload()
     if raw is None:
-        _emit(format_zcode_output("ask", "payload read timeout / empty input"))
+        _emit(format_zcode_output("ask", format_fallback_reason("payload read timeout / empty input")))
         return 0
 
     try:
         payload = json.loads(raw) if raw.strip() else {}
     except Exception as exc:
-        _emit(format_zcode_output("ask", f"malformed hook payload: {exc}"))
+        _emit(format_zcode_output("ask", format_fallback_reason(f"malformed hook payload: {exc}")))
         return 0
 
     if "hook_event_name" in payload:
@@ -144,7 +146,7 @@ def main() -> int:
         t1 = evaluate_tool_call(norm["tool_name"], norm["command"], norm["cwd"],
                                 norm["target"], [ws_root], settings.allow_network_commands,
                                 extra_write_roots=extra_roots,
-                                path_policy="strategy_c")
+                                path_policy=settings.path_policy)
         if t1 is not None:
             decision = Decision(t1.decision, t1.reason, t1.tier)
         elif norm["tool_name"] == "run_command":
@@ -162,7 +164,7 @@ def main() -> int:
 
         _emit(format_zcode_output(decision.decision, decision.reason))
     except Exception as exc:
-        _emit(format_zcode_output("ask", f"evaluator crash: {exc}"))
+        _emit(format_zcode_output("ask", format_fallback_reason(f"evaluator crash: {exc}")))
 
     return 0
 

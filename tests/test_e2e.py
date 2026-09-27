@@ -85,7 +85,7 @@ def test_e2e_whitelisted_bash_allows(tmp_path):
     }
     proc, data = run_evaluator(payload, extra_env={"JEV_LOG_FILE": str(log_file)})
     hook_out = assert_zcode_hook_output(data, expected_decision="allow")
-    assert "whitelist" in hook_out["permissionDecisionReason"]
+    assert any(term in hook_out["permissionDecisionReason"] for term in ("只读命令", "自动放行"))
 
 
 def test_e2e_blocklisted_bash_denies(tmp_path):
@@ -99,7 +99,7 @@ def test_e2e_blocklisted_bash_denies(tmp_path):
     }
     proc, data = run_evaluator(payload, extra_env={"JEV_LOG_FILE": str(log_file)})
     hook_out = assert_zcode_hook_output(data, expected_decision="deny")
-    assert "blocklist" in hook_out["permissionDecisionReason"]
+    assert any(term in hook_out["permissionDecisionReason"] for term in ("阻断", "破坏操作", "高危"))
 
 
 def test_e2e_system_path_write_denies(tmp_path):
@@ -114,7 +114,7 @@ def test_e2e_system_path_write_denies(tmp_path):
     }
     proc, data = run_evaluator(payload, extra_env={"JEV_LOG_FILE": str(log_file)})
     hook_out = assert_zcode_hook_output(data, expected_decision="deny")
-    assert any(term in hook_out["permissionDecisionReason"] for term in ("system directory", "sensitive credential"))
+    assert any(term in hook_out["permissionDecisionReason"] for term in ("系统目录", "私钥凭据"))
 
 
 def test_e2e_credential_path_write_denies(tmp_path):
@@ -128,7 +128,7 @@ def test_e2e_credential_path_write_denies(tmp_path):
     }
     proc, data = run_evaluator(payload, extra_env={"JEV_LOG_FILE": str(log_file)})
     hook_out = assert_zcode_hook_output(data, expected_decision="deny")
-    assert any(term in hook_out["permissionDecisionReason"] for term in ("system directory", "sensitive credential"))
+    assert any(term in hook_out["permissionDecisionReason"] for term in ("系统目录", "私钥凭据"))
 
 
 def test_e2e_outside_workspace_write_asks(tmp_path):
@@ -146,7 +146,7 @@ def test_e2e_outside_workspace_write_asks(tmp_path):
     }
     proc, data = run_evaluator(payload, extra_env={"JEV_LOG_FILE": str(log_file)})
     hook_out = assert_zcode_hook_output(data, expected_decision="ask")
-    assert "outside workspace" in hook_out["permissionDecisionReason"]
+    assert any(term in hook_out["permissionDecisionReason"] for term in ("工作区外部", "越界防护"))
 
 
 def test_e2e_empty_payload_fails_closed():
@@ -203,3 +203,21 @@ def test_e2e_zcode_camelcase_fields():
     proc, data = run_evaluator(payload)
     hook_out = assert_zcode_hook_output(data, expected_decision="allow")
     assert hook_out["permissionDecision"] == "allow"
+
+
+def test_e2e_workspace_source_write_allows(tmp_path):
+    """Workspace safe source file write: decision == 'allow'."""
+    ws = tmp_path / "workspace"
+    os.makedirs(ws / ".git", exist_ok=True)
+    src_file = ws / "src" / "app.py"
+    log_file = tmp_path / "audit.log"
+
+    payload = {
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(src_file), "content": "print('hello')"},
+        "cwd": str(ws),
+        "session_id": "e2e-session-src",
+    }
+    proc, data = run_evaluator(payload, extra_env={"JEV_LOG_FILE": str(log_file)})
+    hook_out = assert_zcode_hook_output(data, expected_decision="allow")
+    assert "代码编写" in hook_out["permissionDecisionReason"]

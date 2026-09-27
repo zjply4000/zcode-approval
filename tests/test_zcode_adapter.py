@@ -199,7 +199,7 @@ def test_main_write_outside_workspace_strategy_c_asks(monkeypatch, capsys, tmp_p
     captured = capsys.readouterr()
     data = json.loads(captured.out.strip())
     assert data["hookSpecificOutput"]["permissionDecision"] == "ask"
-    assert "outside workspace" in data["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "工作区外部" in data["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_main_logging_failure_does_not_break_decision(monkeypatch, capsys, tmp_path):
@@ -243,7 +243,7 @@ def test_main_write_system_path_strategy_c_denied(monkeypatch, capsys, tmp_path)
     captured = capsys.readouterr()
     data = json.loads(captured.out.strip())
     assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
-    assert "system directory" in data["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "系统目录" in data["hookSpecificOutput"]["permissionDecisionReason"]
 
 
 def test_main_write_zcode_memories_auto_allowed(monkeypatch, capsys, tmp_path):
@@ -271,7 +271,7 @@ def test_main_write_zcode_memories_auto_allowed(monkeypatch, capsys, tmp_path):
     captured = capsys.readouterr()
     data = json.loads(captured.out.strip())
     assert data["hookSpecificOutput"]["permissionDecision"] == "allow"
-    assert "artifact" in data["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "工件" in data["hookSpecificOutput"]["permissionDecisionReason"] or "记忆" in data["hookSpecificOutput"]["permissionDecisionReason"]
 
     # Also verify non-memory sibling path under ~/.zcode/cli is NOT auto-allowed
     non_memory = tmp_path / "custom_memories" / ".." / "config.json"
@@ -287,5 +287,32 @@ def test_main_write_zcode_memories_auto_allowed(monkeypatch, capsys, tmp_path):
     captured = capsys.readouterr()
     data2 = json.loads(captured.out.strip())
     assert data2["hookSpecificOutput"]["permissionDecision"] == "ask"
-    assert "outside workspace" in data2["hookSpecificOutput"]["permissionDecisionReason"]
+    assert "工作区外部" in data2["hookSpecificOutput"]["permissionDecisionReason"]
 
+
+def test_main_write_workspace_source_auto_allowed(monkeypatch, capsys, tmp_path):
+    import zcode_evaluator
+
+    log_file = tmp_path / "audit.log"
+    monkeypatch.setenv("JEV_LOG_FILE", str(log_file))
+
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / ".git").mkdir()
+    src_file = ws / "src" / "index.ts"
+
+    payload = json.dumps({
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(src_file), "content": "export const x = 1;"},
+        "cwd": str(ws),
+        "session_id": "test-session-src",
+    })
+    monkeypatch.setattr(zcode_evaluator, "read_stdin_payload", lambda: payload)
+    monkeypatch.setattr(sys, "argv", ["zcode_evaluator.py"])
+
+    code = main()
+    assert code == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out.strip())
+    assert data["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "代码编写" in data["hookSpecificOutput"]["permissionDecisionReason"]
