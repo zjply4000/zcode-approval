@@ -1,6 +1,6 @@
 # zcode-approval
 
-A `PreToolUse` permission guardrail for [ZCode](https://zcode.z.ai/) that adapts the shared **`jev-evaluator`** policy core to ZCode's hook protocol and security model.
+A hook-based permission guardrail for [ZCode](https://zcode.z.ai/) (`PreToolUse` + `PermissionRequest`) that adapts the shared **`jev-evaluator`** policy core to ZCode's hook protocol and security model.
 
 It combines a deterministic fast path for clear `allow`/`deny` decisions with TypeSafe Jev classification for ambiguous tool calls. Uncertain or policy-sensitive actions fall back to manual approval (`ask`).
 
@@ -41,6 +41,12 @@ The shared policy core is maintained in [antigravity-approval](https://github.co
    - Creates dual backups (`config.json.orig.bak` preserved permanently, plus timestamped backups).
    - Preserves all existing settings and third-party hooks.
 
+5. **PermissionRequest Fallback Path**:
+   - Registered alongside `PreToolUse` and consulted whenever the host is about to render a confirmation dialog.
+   - Re-runs the deterministic Tier-1 only (no Tier-2): rescues workspace source edits to silent `allow` and blocks blocklist commands with `deny` when the PreToolUse evaluation is unavailable (crash / host timeout); everything else passes through to the native prompt.
+   - Crash paths emit a `crash_fallback` audit line so fault moments are visible.
+   - Known platform limit: ZCode does not invoke either hook event for subagent tool calls — see [docs/superpowers/specs/2026-09-27-permissionrequest-hook-subagent-gap.md](docs/superpowers/specs/2026-09-27-permissionrequest-hook-subagent-gap.md).
+
 ---
 
 ## Directory Structure
@@ -56,10 +62,13 @@ zcode-approval\
 │   ├── test_workspace_root.py  # Tests for workspace root resolution & home boundary
 │   ├── test_zcode_adapter.py   # Tests for tool normalization, output formatting & exit hygiene
 │   ├── test_install_hook.py    # Hermetic tests for config merging & backup creation
+│   ├── test_permission_request.py  # PermissionRequest event: dispatch, verdict mapping, audit
+│   ├── test_crash_fallback.py  # Fault-injection tests for the fallback path
 │   └── test_e2e.py             # Full subprocess end-to-end integration tests
 └── docs\
     └── superpowers\
         ├── specs\2026-09-26-jev-permission-evaluator-zcode-design.md
+        ├── specs\2026-09-27-permissionrequest-hook-subagent-gap.md
         └── plans\2026-09-26-zcode-approval-hook.md
 ```
 

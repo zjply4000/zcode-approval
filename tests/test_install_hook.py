@@ -258,3 +258,58 @@ def test_main_success(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: p
     assert config_path.exists()
     captured = capsys.readouterr()
     assert "Successfully installed" in captured.out
+
+
+def test_fresh_install_registers_both_events(tmp_path: Path):
+    config_path = tmp_path / "config.json"
+    venv_py = tmp_path / "venv" / "python.exe"
+    script_path = tmp_path / "scripts" / "zcode_evaluator.py"
+
+    install(config_path=config_path, venv_py=venv_py, script_path=script_path)
+
+    events = json.loads(config_path.read_text(encoding="utf-8"))["hooks"]["events"]
+    assert set(events) >= {"PreToolUse", "PermissionRequest"}
+    for event, rules in events.items():
+        if event not in ("PreToolUse", "PermissionRequest"):
+            continue
+        assert len(rules) == 1
+        hook = rules[0]["hooks"][0]
+        assert rules[0]["matcher"] == "Bash|Write|Edit|ApplyPatch"
+        assert hook["args"] == [script_path.as_posix(), "--event", event]
+
+
+def test_install_adds_permission_request_to_existing_pretooluse_only_config(tmp_path: Path):
+    config_path = tmp_path / "config.json"
+    venv_py = tmp_path / "venv" / "python.exe"
+    script_path = tmp_path / "scripts" / "zcode_evaluator.py"
+
+    config_path.write_text(json.dumps({
+        "hooks": {"enabled": True, "events": {"PreToolUse": [{
+            "matcher": "Bash|Write|Edit|ApplyPatch",
+            "hooks": [{"type": "process", "command": venv_py.as_posix(),
+                       "args": [script_path.as_posix(), "--event", "PreToolUse"],
+                       "enabled": True, "timeoutMs": 10000}],
+        }]}},
+    }), encoding="utf-8")
+
+    install(config_path=config_path, venv_py=venv_py, script_path=script_path)
+
+    events = json.loads(config_path.read_text(encoding="utf-8"))["hooks"]["events"]
+    assert len(events["PreToolUse"]) == 1  # updated in place, not duplicated
+    assert len(events["PermissionRequest"]) == 1
+    assert events["PermissionRequest"][0]["hooks"][0]["args"] == [
+        script_path.as_posix(), "--event", "PermissionRequest",
+    ]
+
+
+def test_install_idempotent_across_both_events(tmp_path: Path):
+    config_path = tmp_path / "config.json"
+    venv_py = tmp_path / "venv" / "python.exe"
+    script_path = tmp_path / "scripts" / "zcode_evaluator.py"
+
+    for _ in range(2):
+        install(config_path=config_path, venv_py=venv_py, script_path=script_path)
+
+    events = json.loads(config_path.read_text(encoding="utf-8"))["hooks"]["events"]
+    assert len(events["PreToolUse"]) == 1
+    assert len(events["PermissionRequest"]) == 1

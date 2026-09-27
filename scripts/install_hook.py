@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path.home() / ".zcode" / "cli" / "config.json"
 DEFAULT_VENV_PY = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 DEFAULT_SCRIPT = ROOT / "scripts" / "zcode_evaluator.py"
+MANAGED_EVENTS = ("PreToolUse", "PermissionRequest")
+EVALUATOR_MATCHER = "Bash|Write|Edit|ApplyPatch"
 
 
 def install(
@@ -21,8 +23,9 @@ def install(
     venv_py: Path | None = None,
     script_path: Path | None = None,
 ) -> Path:
-    """Safely and non-destructively merge the ZCode PreToolUse hook into config.json.
+    """Safely and non-destructively merge the ZCode hook configuration into config.json.
 
+    Registers one evaluator rule per managed event (PreToolUse, PermissionRequest).
     Creates an original backup `config.json.orig.bak` (if not already present)
     and a timestamped backup `config.json.<YYYYMMDD_HHMMSS>.bak` before writing.
     Preserves all third-party hooks and settings.
@@ -69,23 +72,36 @@ def install(
         events = {}
         hooks["events"] = events
 
-    pre_tool = events.setdefault("PreToolUse", [])
-    if not isinstance(pre_tool, list):
-        pre_tool = []
-        events["PreToolUse"] = pre_tool
+    for event in MANAGED_EVENTS:
+        upsert_evaluator_rule(
+            events, event,
+            {
+                "type": "process",
+                "command": venv_py.as_posix(),
+                "args": [script_path.as_posix(), "--event", event],
+                "enabled": True,
+                "timeoutMs": 10000,
+            },
+        )
 
-    target_hook = {
-        "type": "process",
-        "command": venv_py.as_posix(),
-        "args": [script_path.as_posix(), "--event", "PreToolUse"],
-        "enabled": True,
-        "timeoutMs": 10000,
-    }
+    tmp_cfg = config_path.with_suffix(".tmp")
+    tmp_cfg.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    os.replace(tmp_cfg, config_path)
+    return config_path
 
-    evaluator_name = "zcode_evaluator.py"
-    found = False
 
-    for rule in pre_tool:
+def upsert_evaluator_rule(events: dict, event: str, target_hook: dict) -> None:
+    """Add or refresh this evaluator's rule under one hook event.
+
+    An existing rule is matched by the evaluator script name in any hook
+    command or arg, then updated in place so third-party rules keep order.
+    """
+    rules = events.setdefault(event, [])
+    if not isinstance(rules, list):
+        events[event] = rules = []
+
+    evaluator_name = Path(target_hook["args"][0]).name
+    for rule in rules:
         if not isinstance(rule, dict):
             continue
         rule_hooks = rule.get("hooks", [])
@@ -97,24 +113,15 @@ def install(
             cmd = str(hook.get("command", ""))
             args = [str(a) for a in hook.get("args", [])]
             if evaluator_name in cmd or any(evaluator_name in a for a in args):
-                rule["matcher"] = "Bash|Write|Edit|ApplyPatch"
+                rule["matcher"] = EVALUATOR_MATCHER
                 hook.clear()
                 hook.update(target_hook)
-                found = True
-                break
-        if found:
-            break
+                return
 
-    if not found:
-        pre_tool.append({
-            "matcher": "Bash|Write|Edit|ApplyPatch",
-            "hooks": [target_hook],
-        })
-
-    tmp_cfg = config_path.with_suffix(".tmp")
-    tmp_cfg.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    os.replace(tmp_cfg, config_path)
-    return config_path
+    rules.append({
+        "matcher": EVALUATOR_MATCHER,
+        "hooks": [dict(target_hook)],
+    })
 
 
 def main(
@@ -122,7 +129,7 @@ def main(
     venv_py: Path | None = None,
     script_path: Path | None = None,
 ) -> int:
-    """Entry point for the ZCode PreToolUse hook installer."""
+    """Entry point for the ZCode hook installer (PreToolUse + PermissionRequest)."""
     config_path = Path(config_path) if config_path is not None else DEFAULT_CONFIG
     venv_py = Path(venv_py) if venv_py is not None else DEFAULT_VENV_PY
     script_path = Path(script_path) if script_path is not None else DEFAULT_SCRIPT

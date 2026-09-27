@@ -94,6 +94,100 @@ def format_zcode_output(decision: str, reason: str) -> dict:
     }
 
 
+def format_permission_request_output(behavior: str, message: str) -> dict:
+    """PermissionRequest envelope: decision.behavior allow/deny, or {} (no
+    decision) to fall through to the host prompt. The allow branch of the
+    host schema carries no message field, so only deny carries one."""
+    if behavior not in ("allow", "deny"):
+        return {}
+    decision: dict = {"behavior": behavior}
+    if behavior == "deny" and message:
+        decision["message"] = message
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PermissionRequest",
+            "decision": decision,
+        }
+    }
+
+
+def extract_hook_context(payload: dict) -> tuple[str, dict, str, str]:
+    """Pull tool_name/tool_input/cwd/session_id from either naming convention."""
+    tool_name = payload.get("tool_name") or payload.get("toolName") or ""
+    tool_input = payload.get("tool_input") if "tool_input" in payload else payload.get("toolInput") or {}
+    cwd = payload.get("cwd") or os.getcwd()
+    session_id = payload.get("session_id") or payload.get("sessionId") or ""
+    return tool_name, tool_input, cwd, session_id
+
+
+def _audit_crash(event: str, payload: object, exc: Exception) -> None:
+    """Best-effort audit line for a crashed evaluation so fault moments leave a
+    trace; logging failures are swallowed (must never break the fallback)."""
+    try:
+        settings = load_settings(host="zcode", workspace_dir=os.getcwd())
+        logger = build_audit_logger(settings.log_file)
+        record = payload if isinstance(payload, dict) else {}
+        audit(logger, event=event,
+              conversationId=str(record.get("session_id") or record.get("sessionId") or ""),
+              tool=str(record.get("tool_name") or record.get("toolName") or ""),
+              input="", tier="crash_fallback",
+              decision="ask" if event == "PreToolUse" else "pass",
+              reason=str(exc)[:200], category=None, confidence=None,
+              latency_ms=None, fail_mode=settings.fail_mode)
+    except Exception:
+        pass
+
+
+def handle_permission_request(payload: dict) -> dict:
+    """Deterministic Tier-1 evaluation for the PermissionRequest event.
+
+    The host fires this hook only when a tool call is about to prompt the
+    user. Subagent tool calls never reach PreToolUse, so this is their only
+    jev evaluation; main-session calls land here only after PreToolUse
+    returned ask (or ran no evaluation). Tier-2 LLM evaluation is therefore
+    deliberately skipped: replaying it could flip a main-session PreToolUse
+    ask into an allow on a second, differently-scored verdict. Allow/deny
+    come from Tier 1 alone; everything else returns no decision and the
+    host prompt proceeds.
+    """
+    try:
+        tool_name, tool_input, cwd, session_id = extract_hook_context(payload)
+
+        ws_root = find_workspace_root(cwd)
+        norm = normalize_zcode_tool_call(tool_name, tool_input, cwd)
+
+        settings = load_settings(host="zcode", workspace_dir=ws_root)
+        try:
+            logger = build_audit_logger(settings.log_file)
+        except Exception:
+            logger = None
+
+        extra_roots = [str(DEFAULT_MEMORIES_ROOT)]
+
+        t1 = evaluate_tool_call(norm["tool_name"], norm["command"], norm["cwd"],
+                                norm["target"], [ws_root], settings.allow_network_commands,
+                                extra_write_roots=extra_roots,
+                                path_policy=settings.path_policy)
+
+        behavior = ""
+        if t1 is not None and t1.decision in ("allow", "deny"):
+            behavior = t1.decision
+
+        if logger is not None:
+            audit(logger, event="PermissionRequest", conversationId=session_id,
+                  tool=tool_name, input=(norm["command"] or norm["target"])[:200],
+                  tier=t1.tier if t1 is not None else "skipped_tier2",
+                  decision=behavior or "pass",
+                  reason=t1.reason if t1 is not None else "tier-2 not evaluated on PermissionRequest",
+                  category=None, confidence=None, latency_ms=None,
+                  fail_mode=settings.fail_mode)
+
+        return format_permission_request_output(behavior, t1.reason if t1 is not None else "")
+    except Exception as exc:
+        _audit_crash("PermissionRequest", payload, exc)
+        return {}  # crash fallback: no decision, host prompt proceeds
+
+
 def _emit(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
     sys.stdout.flush()
@@ -108,7 +202,10 @@ def main() -> int:
 
     raw = read_stdin_payload()
     if raw is None:
-        _emit(format_zcode_output("ask", format_fallback_reason("payload read timeout / empty input")))
+        # A PermissionRequest hook that emits nothing falls through to the
+        # host prompt; only PreToolUse has an ask-shaped fail-closed output.
+        _emit({} if event == "PermissionRequest"
+               else format_zcode_output("ask", format_fallback_reason("payload read timeout / empty input")))
         return 0
 
     try:
@@ -122,15 +219,16 @@ def main() -> int:
     elif "hookEventName" in payload:
         event = payload["hookEventName"]
 
+    if event == "PermissionRequest":
+        _emit(handle_permission_request(payload))
+        return 0
+
     if event != "PreToolUse":
         _emit({})
         return 0
 
     try:
-        tool_name = payload.get("tool_name") or payload.get("toolName") or ""
-        tool_input = payload.get("tool_input") if "tool_input" in payload else payload.get("toolInput") or {}
-        cwd = payload.get("cwd") or os.getcwd()
-        session_id = payload.get("session_id") or payload.get("sessionId") or ""
+        tool_name, tool_input, cwd, session_id = extract_hook_context(payload)
 
         ws_root = find_workspace_root(cwd)
         norm = normalize_zcode_tool_call(tool_name, tool_input, cwd)
@@ -156,14 +254,14 @@ def main() -> int:
             decision = Decision("ask", f"unhandled tool {tool_name!r}", "fallback")
 
         if logger is not None:
-            audit(logger, conversationId=session_id, tool=tool_name,
+            audit(logger, event=event, conversationId=session_id, tool=tool_name,
                   input=(norm["command"] or norm["target"])[:200], tier=decision.tier,
                   decision=decision.decision, reason=decision.reason,
                   category=decision.category, confidence=decision.confidence,
                   latency_ms=decision.latency_ms, fail_mode=settings.fail_mode)
-
         _emit(format_zcode_output(decision.decision, decision.reason))
     except Exception as exc:
+        _audit_crash(event, payload, exc)
         _emit(format_zcode_output("ask", format_fallback_reason(f"evaluator crash: {exc}")))
 
     return 0
