@@ -244,3 +244,48 @@ def test_main_write_system_path_strategy_c_denied(monkeypatch, capsys, tmp_path)
     data = json.loads(captured.out.strip())
     assert data["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "system directory" in data["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_main_write_zcode_memories_auto_allowed(monkeypatch, capsys, tmp_path):
+    import zcode_evaluator
+    ws = tmp_path / "ws"
+    ws.mkdir()
+
+    # Point memories root to a tmp dir to avoid touching user real home
+    memories_dir = tmp_path / "custom_memories"
+    memories_file = memories_dir / "projects" / "photos-123" / "memory" / "MEMORY.md"
+    memories_file.parent.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(zcode_evaluator, "DEFAULT_MEMORIES_ROOT", memories_dir)
+
+    payload = json.dumps({
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(memories_file), "content": "# Project Memories"},
+        "cwd": str(ws),
+        "session_id": "test-session-mem",
+    })
+    monkeypatch.setattr(zcode_evaluator, "read_stdin_payload", lambda: payload)
+    monkeypatch.setattr(sys, "argv", ["zcode_evaluator.py"])
+
+    code = main()
+    assert code == 0
+    captured = capsys.readouterr()
+    data = json.loads(captured.out.strip())
+    assert data["hookSpecificOutput"]["permissionDecision"] == "allow"
+    assert "artifact" in data["hookSpecificOutput"]["permissionDecisionReason"]
+
+    # Also verify non-memory sibling path under ~/.zcode/cli is NOT auto-allowed
+    non_memory = tmp_path / "custom_memories" / ".." / "config.json"
+    payload2 = json.dumps({
+        "tool_name": "Write",
+        "tool_input": {"file_path": str(non_memory.resolve()), "content": "{}"},
+        "cwd": str(ws),
+        "session_id": "test-session-mem-2",
+    })
+    monkeypatch.setattr(zcode_evaluator, "read_stdin_payload", lambda: payload2)
+    code = main()
+    assert code == 0
+    captured = capsys.readouterr()
+    data2 = json.loads(captured.out.strip())
+    assert data2["hookSpecificOutput"]["permissionDecision"] == "ask"
+    assert "outside workspace" in data2["hookSpecificOutput"]["permissionDecisionReason"]
+

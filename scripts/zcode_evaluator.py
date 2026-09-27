@@ -41,6 +41,8 @@ _TOOL_MAP = {
     "ApplyPatch": "replace_file_content",
 }
 
+DEFAULT_MEMORIES_ROOT = Path(os.environ.get("ZCODE_MEMORIES_DIR") or (Path.home() / ".zcode" / "cli" / "memories"))
+
 
 def find_workspace_root(cwd: str | None = None) -> str:
     """Find the workspace root directory by searching upwards for .git or .zcode markers.
@@ -137,8 +139,11 @@ def main() -> int:
         except Exception:
             logger = None
 
+        extra_roots = [str(DEFAULT_MEMORIES_ROOT)]
+
         t1 = evaluate_tool_call(norm["tool_name"], norm["command"], norm["cwd"],
                                 norm["target"], [ws_root], settings.allow_network_commands,
+                                extra_write_roots=extra_roots,
                                 path_policy="strategy_c")
         if t1 is not None:
             decision = Decision(t1.decision, t1.reason, t1.tier)
